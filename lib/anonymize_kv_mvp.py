@@ -171,33 +171,50 @@ def anonymize_df(
     email_preserve_domain: bool = True,
     hmac_token_len: int = 22,
     hmac_email_len: int = 16,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """
     Unified anonymizer with mode flag.
-      - mode="hmac": deterministic HMAC-SHA256 Base32 tokens
-      - mode="fpe" : format-preserving (pyffx if available else shim)
+
+    Returns:
+      (anonymized_df, mapping_list)
+      - anonymized_df : DataFrame with sensitive values replaced
+      - mapping_list  : list of dicts per row; each dict holds {col: (original, anonymized)} pairs
     """
     key = bytes.fromhex(key_hex)
     work = df if in_place else df.copy(deep=True)
 
-    for col in columns:
-        if col not in work.columns:
-            continue
-        if mode == "hmac":
-            if "email" in col.lower():
-                work[col] = work[col].map(
-                    lambda v: anonymize_email_hmac(
-                        v, key, length=hmac_email_len, preserve_domain=email_preserve_domain
+    mapping_list: list[dict] = []
+
+    for i, row in work.iterrows():
+        row_map = {}
+        for col in columns:
+            if col not in work.columns:
+                continue
+            original = row[col]
+
+            if mode == "hmac":
+                if "email" in col.lower():
+                    anonymized = anonymize_email_hmac(
+                        original, key,
+                        length=hmac_email_len,
+                        preserve_domain=email_preserve_domain,
                     )
-                )
+                else:
+                    anonymized = token_hmac(original, key, length=hmac_token_len)
+            elif mode == "fpe":
+                if "email" in col.lower():
+                    anonymized = anonymize_email_fpe(original, key, preserve_domain=email_preserve_domain)
+                else:
+                    tweak = str(col).encode("utf-8", errors="ignore")
+                    anonymized = fpe_string(original, key, tweak=tweak)
             else:
-                work[col] = work[col].map(lambda v: token_hmac(v, key, length=hmac_token_len))
-        elif mode == "fpe":
-            if "email" in col.lower():
-                work[col] = work[col].map(lambda v: anonymize_email_fpe(v, key, preserve_domain=email_preserve_domain))
-            else:
-                tweak = str(col).encode("utf-8", errors="ignore")
-                work[col] = work[col].map(lambda v: fpe_string(v, key, tweak=tweak))
-        else:
-            raise ValueError("mode must be 'hmac' or 'fpe'")
-    return work
+                raise ValueError("mode must be 'hmac' or 'fpe'")
+
+            # Update DataFrame
+            work.at[i, col] = anonymized
+            # Add to mapping dictionary
+            row_map[col] = {"original": original, "anonymized": anonymized}
+
+        mapping_list.append(row_map)
+
+    return work, mapping_list
