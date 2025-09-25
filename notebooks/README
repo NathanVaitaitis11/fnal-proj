@@ -1,0 +1,5 @@
+This folder contains notebooks for fnal projects:
+
+- explore_data.ipynb - exploratory notebook to play around with data and anonymization methods
+- read_field.ipynb - FNAL provided example on how to access data
+- anon_demo.ipynb - demo prototype of first implementation try
